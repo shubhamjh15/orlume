@@ -5,6 +5,8 @@ import Image from "next/image";
 import { MoreHorizontal, Trash2, FolderPlus } from "lucide-react";
 import clsx from "clsx";
 
+import { createClient } from "@/utils/supabase/client";
+
 interface Project {
   id: string;
   title: string;
@@ -15,56 +17,7 @@ interface Project {
 }
 
 const INITIAL_DATA: Project[] = [
-  // PROJECTS (6 items)
-  {
-    id: "p1",
-    title: "My Little Clone",
-    thumbnail: "/Generated%20Image%20January%2008,%202026%20-%205_06PM.webp",
-    lastViewed: "Viewed 3 hours ago",
-    icon: "🎨",
-    type: "project"
-  },
-  {
-    id: "p2",
-    title: "Simple Cloud Services",
-    thumbnail: "/Generated%20Image%20January%2008,%202026%20-%205_06PM.webp",
-    lastViewed: "Viewed 2 days ago",
-    icon: "☁️",
-    type: "project"
-  },
-  {
-    id: "p3",
-    title: "Rungta Landing Page",
-    thumbnail: "/Generated%20Image%20January%2008,%202026%20-%205_06PM.webp",
-    lastViewed: "Viewed 5 days ago",
-    icon: "🏫",
-    type: "project"
-  },
-  {
-    id: "p4",
-    title: "Tool Showcase",
-    thumbnail: "/Generated%20Image%20January%2008,%202026%20-%205_06PM.webp",
-    lastViewed: "Viewed 7 days ago",
-    icon: "🛠️",
-    type: "project"
-  },
-  {
-    id: "p5",
-    title: "Blackout Button",
-    thumbnail: "/Generated%20Image%20January%2008,%202026%20-%205_06PM.webp",
-    lastViewed: "Viewed 16 days ago",
-    icon: "⚫",
-    type: "project"
-  },
-   {
-    id: "p6",
-    title: "Personal Portfolio",
-    thumbnail: "/Generated%20Image%20January%2008,%202026%20-%205_06PM.webp",
-    lastViewed: "Viewed 18 days ago",
-    icon: "👤",
-    type: "project"
-  },
-
+  // PROJECTS (Dummy items removed from initial state, fetched at runtime)
   // TEMPLATES (6 items)
   {
     id: "t1",
@@ -117,10 +70,12 @@ const INITIAL_DATA: Project[] = [
 ];
 
 export default function ProjectGrid() {
-  const [activeTab, setActiveTab] = useState<"recent" | "projects" | "templates">("recent");
+  const [activeTab, setActiveTab] = useState<"projects" | "templates">("projects");
   const [items, setItems] = useState<Project[]>(INITIAL_DATA);
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [loading, setLoading] = useState(false);
+  const supabase = createClient();
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -133,15 +88,83 @@ export default function ProjectGrid() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleDelete = (id: string) => {
+  useEffect(() => {
+    const fetchProjects = async () => {
+      // Only fetch if "projects" tab is active
+      if (activeTab !== "projects") return; 
+
+      setLoading(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        setLoading(false);
+        return;
+      }
+
+      const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "https://6a68a84ec602.ngrok-free.app";
+      const API_PREFIX = "/api/v1";
+
+      try {
+        const res = await fetch(`${BACKEND_URL}${API_PREFIX}/projects/list?page=1&page_size=50`, {
+           headers: {
+              'Authorization': `Bearer ${session.access_token}`,
+              'ngrok-skip-browser-warning': 'true'
+           }
+        });
+
+        if (!res.ok) {
+           console.error("Failed to fetch projects:", await res.text());
+           setLoading(false);
+           return;
+        }
+
+        const data = await res.json();
+        
+        // ProjectListResponse structure: { items: [], total: int, page: int, size: int }
+        const projectList = data.items || [];
+
+        const mappedProjects: Project[] = projectList.map((p: any) => ({
+          id: p.id,
+          title: p.project_name || p.name || "Untitled Project", 
+          thumbnail: "/Generated%20Image%20January%2008,%202026%20-%205_06PM.webp", // Todo: Add thumbnail field to API
+          lastViewed: p.updated_at 
+             ? `Updated ${new Date(p.updated_at).toLocaleDateString()}` 
+             : `Created ${new Date(p.created_at).toLocaleDateString()}`,
+          icon: "📦", // Todo: Add icon field to API
+          type: 'project'
+        }));
+
+        setItems((prev) => {
+           // Keep templates, replace projects
+           const templates = prev.filter(i => i.type === 'template');
+           return [...mappedProjects, ...templates];
+        });
+
+      } catch (err) {
+          console.error("Error fetching projects:", err);
+      } finally {
+          setLoading(false);
+      }
+    };
+
+    fetchProjects();
+  }, [activeTab]);
+
+  const handleDelete = async (id: string) => {
+    // Optimistic update
     setItems((prev) => prev.filter((item) => item.id !== id));
     setActiveMenu(null);
+    
+    // Delete from DB if it's a real project
+    if (items.find(i => i.id === id)?.type === 'project') {
+       await supabase.from('projects').delete().eq('id', id);
+    }
   };
 
   const filteredItems = items.filter((item) => {
     if (activeTab === "projects") return item.type === "project";
     if (activeTab === "templates") return item.type === "template";
-    return true; // 'recent' shows all
+    return false;
   });
 
   return (
@@ -150,104 +173,110 @@ export default function ProjectGrid() {
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setActiveTab("recent")}
-            className={clsx(
-              "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
-              activeTab === "recent" ? "bg-white/10 text-white" : "text-white/50 hover:text-white hover:bg-white/5"
-            )}
-          >
-            Recently viewed
-          </button>
-          <button
             onClick={() => setActiveTab("projects")}
             className={clsx(
-              "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
-              activeTab === "projects" ? "bg-white/10 text-white" : "text-white/50 hover:text-white hover:bg-white/5"
+              "flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer",
+              activeTab === "projects" ? "bg-[#1a1a1a] text-white" : "text-[#888] hover:text-white"
             )}
           >
-            My projects
+            {activeTab === "projects" && <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />}
+            My Projects
           </button>
           <button
             onClick={() => setActiveTab("templates")}
             className={clsx(
-              "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
-              activeTab === "templates" ? "bg-white/10 text-white" : "text-white/50 hover:text-white hover:bg-white/5"
+              "flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer ml-2",
+              activeTab === "templates" ? "bg-[#1a1a1a] text-white" : "text-[#888] hover:text-white"
             )}
           >
+             {activeTab === "templates" && <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />}
             Templates
           </button>
         </div>
       </div>
 
       {/* Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-        {filteredItems.map((project) => (
-          <div key={project.id} className="group relative flex flex-col gap-3">
-            {/* Thumbnail Card */}
-            <div className="relative aspect-video w-full rounded-xl overflow-hidden bg-[#1a1a1a] border border-white/5 group-hover:border-white/20 transition-all shadow-lg group-hover:shadow-2xl group-hover:translate-y-[-2px]">
-              <Image
-                src={project.thumbnail}
-                alt={project.title}
-                fill
-                className="object-cover opacity-80 group-hover:opacity-100 transition-opacity grayscale group-hover:grayscale-0"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+      {/* Grid */}
+      <div className="min-h-[50vh]">
+        {filteredItems.length === 0 ? (
+          <div className="h-[50vh] flex flex-col items-center justify-center text-white/20">
+            <div className="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center mb-4">
+              <FolderPlus size={32} />
             </div>
-
-            {/* Info */}
-            <div className="flex items-start justify-between px-1 relative">
-              <div className="flex gap-3">
-                <div className="w-8 h-8 rounded-full bg-orange-500/20 text-orange-400 flex items-center justify-center text-sm border border-orange-500/10">
-                  {project.icon}
+            <p className="text-lg font-medium">No {activeTab} found</p>
+            <p className="text-sm">Create a new {activeTab === 'projects' ? 'project' : 'template'} to get started</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {filteredItems.map((project) => (
+              <div key={project.id} className="group relative flex flex-col gap-3">
+                {/* Thumbnail Card */}
+                <div className="relative aspect-video w-full rounded-xl overflow-hidden bg-[#1a1a1a] border border-white/5 group-hover:border-white/20 transition-all shadow-lg group-hover:shadow-2xl group-hover:translate-y-[-2px]">
+                  <Image
+                    src={project.thumbnail}
+                    alt={project.title}
+                    fill
+                    className="object-cover opacity-80 group-hover:opacity-100 transition-opacity grayscale group-hover:grayscale-0"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                 </div>
-                <div>
-                  <h3 className="text-sm font-medium text-white group-hover:text-blue-400 transition-colors">
-                    {project.title}
-                  </h3>
-                  <p className="text-xs text-white/40 mt-0.5">{project.lastViewed}</p>
+
+                {/* Info */}
+                <div className="flex items-start justify-between px-1 relative">
+                  <div className="flex gap-3">
+                    <div className="w-8 h-8 rounded-full bg-orange-500/20 text-orange-400 flex items-center justify-center text-sm border border-orange-500/10">
+                      {project.icon}
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-medium text-white group-hover:text-blue-400 transition-colors">
+                        {project.title}
+                      </h3>
+                      <p className="text-xs text-white/40 mt-0.5">{project.lastViewed}</p>
+                    </div>
+                  </div>
+                  
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActiveMenu(activeMenu === project.id ? null : project.id);
+                    }}
+                    className={clsx(
+                       "text-white/20 hover:text-white transition-colors relative z-20",
+                       activeMenu === project.id && "text-white"
+                    )}
+                  >
+                    <MoreHorizontal size={16} />
+                  </button>
+
+                  {/* Dropdown Menu */}
+                  {activeMenu === project.id && (
+                    <div 
+                       ref={menuRef}
+                       className="absolute right-0 top-8 w-48 bg-[#1a1a1a] border border-white/10 rounded-xl shadow-xl z-30 overflow-hidden animate-in fade-in zoom-in-95 duration-100"
+                    >
+                       <div className="p-1">
+                          <button className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/70 hover:text-white hover:bg-white/5 rounded-lg transition-colors text-left">
+                            <FolderPlus size={14} />
+                            Add to folder
+                          </button>
+                          <button 
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                handleDelete(project.id);
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors text-left"
+                          >
+                            <Trash2 size={14} />
+                            Delete project
+                          </button>
+                       </div>
+                    </div>
+                  )}
                 </div>
               </div>
-              
-              <button 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setActiveMenu(activeMenu === project.id ? null : project.id);
-                }}
-                className={clsx(
-                   "text-white/20 hover:text-white transition-colors relative z-20",
-                   activeMenu === project.id && "text-white"
-                )}
-              >
-                <MoreHorizontal size={16} />
-              </button>
-
-              {/* Dropdown Menu */}
-              {activeMenu === project.id && (
-                <div 
-                   ref={menuRef}
-                   className="absolute right-0 top-8 w-48 bg-[#1a1a1a] border border-white/10 rounded-xl shadow-xl z-30 overflow-hidden animate-in fade-in zoom-in-95 duration-100"
-                >
-                   <div className="p-1">
-                      <button className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/70 hover:text-white hover:bg-white/5 rounded-lg transition-colors text-left">
-                        <FolderPlus size={14} />
-                        Add to folder
-                      </button>
-                      <button 
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            handleDelete(project.id);
-                        }}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors text-left"
-                      >
-                        <Trash2 size={14} />
-                        Delete project
-                      </button>
-                   </div>
-                </div>
-              )}
-            </div>
+            ))}
           </div>
-        ))}
+        )}
       </div>
     </div>
   );

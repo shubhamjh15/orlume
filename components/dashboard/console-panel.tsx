@@ -1,33 +1,18 @@
 "use client";
 
-import { X, Copy, Trash2, Filter } from "lucide-react";
+import { X, Copy, Trash2 } from "lucide-react";
 import { useState } from "react";
 import clsx from "clsx";
-
-interface LogMessage {
-  id: string;
-  timestamp: string;
-  type: "info" | "warning" | "error";
-  message: string;
-}
-
-const MOCK_LOGS: LogMessage[] = [
-  {
-    id: "1",
-    timestamp: new Date().toISOString().split('T')[1].slice(0, 12) + "Z", // Format like 23:41:55.628Z
-    type: "warning",
-    message: "THREE.WARNING: Multiple instances of Three.js being imported."
-  }
-];
+import { LogEntry } from "./workspace-panel";
 
 interface ConsolePanelProps {
   isOpen: boolean;
   onClose: () => void;
   height?: number;
+  logs: LogEntry[];
 }
 
-export default function ConsolePanel({ isOpen, onClose, height = 200 }: ConsolePanelProps) {
-  const [logs, setLogs] = useState<LogMessage[]>(MOCK_LOGS);
+export default function ConsolePanel({ isOpen, onClose, height = 200, logs }: ConsolePanelProps) {
   const [filter, setFilter] = useState("");
 
   if (!isOpen) return null;
@@ -58,16 +43,6 @@ export default function ConsolePanel({ isOpen, onClose, height = 200 }: ConsoleP
           </div>
 
           <div className="flex items-center gap-1 border-l border-white/10 pl-2 ml-1">
-             <button className="p-1 hover:bg-white/10 rounded text-white/50 hover:text-white transition-colors" title="Copy">
-               <Copy size={12} />
-             </button>
-             <button 
-                onClick={() => setLogs([])}
-                className="p-1 hover:bg-white/10 rounded text-white/50 hover:text-white transition-colors" 
-                title="Clear"
-             >
-               <Trash2 size={12} />
-             </button>
              <button 
                 onClick={onClose}
                 className="p-1 hover:bg-white/10 rounded text-white/50 hover:text-white transition-colors" 
@@ -85,18 +60,20 @@ export default function ConsolePanel({ isOpen, onClose, height = 200 }: ConsoleP
           <div 
             key={log.id} 
             className={clsx(
-                "flex items-start gap-2 px-2 py-1 hover:bg-white/5 rounded select-text",
+                "flex items-start gap-2 px-2 py-1 hover:bg-white/5 rounded select-text whitespace-pre-wrap",
                 log.type === "warning" && "text-orange-400 bg-orange-500/5",
                 log.type === "error" && "text-red-400 bg-red-500/5",
                 log.type === "info" && "text-white/80"
             )}
           >
-             <span className="opacity-50 flex-shrink-0 select-none">{log.timestamp}</span>
+             <span className="opacity-50 flex-shrink-0 select-none text-white/30">{log.timestamp}</span>
              <span className="break-all">{log.message}</span>
           </div>
         ))}
         {filteredLogs.length === 0 && (
-            <div className="px-2 py-1 text-white/20 italic">No logs found</div>
+            <div className="px-2 py-1 text-white/20 italic">
+               {logs.length === 0 ? "Waiting for logs..." : "No matching logs."}
+            </div>
         )}
       </div>
     </div>

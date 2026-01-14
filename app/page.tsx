@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowUp, X } from "lucide-react";
+import { ArrowUp, X, Loader2 } from "lucide-react";
 import { useState, useEffect } from "react";
 import AuthModal from "../components/auth-modal";
 import { createClient } from "@/utils/supabase/client";
@@ -17,6 +17,7 @@ export default function Home() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authView, setAuthView] = useState<"login" | "signup">("login");
   const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   const supabase = createClient();
 
@@ -43,11 +44,13 @@ export default function Home() {
   const [prompt, setPrompt] = useState("");
 
   const handleGenerate = () => {
+    if (isLoading) return;
     if (!user) {
       openAuthModal("signup");
       return;
     }
     if (prompt.trim()) {
+      setIsLoading(true);
       window.location.href = `/dashboard?prompt=${encodeURIComponent(prompt)}`;
     }
   };
@@ -89,7 +92,7 @@ export default function Home() {
       {/* Background Image */}
       <div 
         className={clsx(
-          "absolute top-0 left-0 w-full -z-10 brightness-[0.8] bg-cover bg-center bg-no-repeat",
+          "absolute top-0 left-0 w-full -z-10 brightness-[0.9] bg-cover bg-center bg-no-repeat",
           user ? "h-[100vh]" : "h-full"
         )}
         style={{ backgroundImage: "url('/Generated%20Image%20January%2008,%202026%20-%205_06PM.webp')" }}
@@ -97,7 +100,7 @@ export default function Home() {
       
       {/* Overlay gradient for smooth transition to dark sections */}
       {user && (
-        <div className="absolute top-[60vh] left-0 w-full h-[40vh] bg-gradient-to-b from-transparent to-[#0a0a0a] -z-10" />
+        <div className="absolute top-[75vh] left-0 w-full h-[25vh] bg-gradient-to-b from-transparent to-[#0a0a0a] -z-10" />
       )}
 
       {/* Navigation */}
@@ -191,10 +194,11 @@ export default function Home() {
               )}
 
               <textarea 
-                className="w-full bg-transparent border-none outline-none text-white placeholder-white/40 text-lg resize-none h-24 dark-scrollbar"
+                className="w-full bg-transparent border-none outline-none text-white placeholder-white/40 text-lg resize-none h-24 dark-scrollbar disabled:opacity-50 disabled:cursor-not-allowed"
                 placeholder="Describe the website you want to build..."
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
+                disabled={isLoading}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
@@ -205,8 +209,8 @@ export default function Home() {
               
               <div className="flex items-center justify-between mt-2">
                 <div className="flex items-center gap-4">
-                  <label className="flex items-center gap-2 text-xs font-medium text-white/50 hover:text-white transition-colors cursor-pointer">
-                    <input type="file" className="hidden" multiple onChange={handleFileUpload} accept="image/*" />
+                  <label className={clsx("flex items-center gap-2 text-xs font-medium text-white/50 hover:text-white transition-colors cursor-pointer", isLoading && "opacity-50 pointer-events-none")}>
+                    <input type="file" className="hidden" multiple onChange={handleFileUpload} accept="image/*" disabled={isLoading} />
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
                     <span>Upload files</span>
                   </label>
@@ -215,9 +219,10 @@ export default function Home() {
                 <div className="flex items-center gap-3">
                    <button 
                     onClick={handleGenerate}
-                    className="p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white transition-colors"
+                    disabled={isLoading}
+                    className={clsx("p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white transition-colors", isLoading && "opacity-50 cursor-not-allowed")}
                   >
-                     <ArrowUp size={20} />
+                     {isLoading ? <Loader2 size={20} className="animate-spin" /> : <ArrowUp size={20} />}
                    </button>
                 </div>
                 </div>

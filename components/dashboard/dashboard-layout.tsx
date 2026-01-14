@@ -1,7 +1,6 @@
-
 "use client";
 
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useEffect, useState, useCallback, useRef } from "react";
 import ChatPanel from "./chat-panel";
 import WorkspacePanel from "./workspace-panel";
@@ -9,83 +8,236 @@ import clsx from "clsx";
 import { MessageSquare, LayoutTemplate } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 import { User } from "@supabase/supabase-js";
-import { useRouter } from "next/navigation";
+import Loader from "./loader";
 
-const DEFAULT_CODE = `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My Generated Site</title>
-    <style>
-        body { margin: 0; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; background: #000; color: white; }
-        h1 { font-size: 3rem; background: linear-gradient(to right, #ec4899, #8b5cf6); -webkit-background-clip: text; color: transparent; }
-    </style>
-</head>
-<body>
-    <h1>Hello World</h1>
-</body>
-</html>`;
+// --- Configuration ---
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "https://6a68a84ec602.ngrok-free.app";
+const API_PREFIX = "/api/v1"; 
+
+// --- Types ---
+export type RemoteConnection = {
+  ip: string;
+  bridgePort: number;
+  previewPort: number;
+  token: string;
+};
+
+type ProjectCreateResponse = {
+  project_id: string; 
+};
+
+type ProjectStatusResponse = {
+  status: "pending" | "provisioning" | "failed" | "ready";
+};
+
+type ProjectDetailsResponse = {
+  ip: string;
+  bridge_port: number;
+  preview_port: number;
+  bridge_token: string;
+};
 
 export default function DashboardLayout() {
   const searchParams = useSearchParams();
-  const prompt = searchParams.get("prompt");
-  const [code, setCode] = useState(DEFAULT_CODE);
-  const [debouncedCode, setDebouncedCode] = useState(DEFAULT_CODE);
-
-  // Debounce code updates for preview
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedCode(code);
-    }, 750); // 750ms delay
-
-    return () => clearTimeout(timer);
-  }, [code]);
-
-  useEffect(() => {
-    // In a real app, this is where we'd call the AI generation API with the prompt
-    if (prompt) {
-      console.log("Generating code for prompt:", prompt);
-    }
-  }, [prompt]);
-
+  const router = useRouter();
+  
+  // Get Project ID from URL
+  const projectIdParam = searchParams.get("projectId");
+  const initialPrompt = searchParams.get("prompt");
+  
+  // --- UI State ---
   const [sidebarWidth, setSidebarWidth] = useState(450);
   const [isDragging, setIsDragging] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [mobileView, setMobileView] = useState<'chat' | 'workspace'>('chat');
-  const [isLoading, setIsLoading] = useState(false);
   const [user, setUser] = useState<User | null>(null);
-  const sidebarWidthRef = useRef(sidebarWidth);
-  const router = useRouter();
 
+  // --- Logic State ---
+  const [connection, setConnection] = useState<RemoteConnection | null>(null);
+  const [projectStatus, setProjectStatus] = useState<string>("initializing");
+  const [statusMessage, setStatusMessage] = useState<string>("Initializing environment...");
+  
+  // State flags to prevent duplicate calls
+  const [isCreating, setIsCreating] = useState(false);
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // --- 1. Authentication Check ---
   useEffect(() => {
     const supabase = createClient();
     const checkUser = async () => {
         const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            router.push('/');
+            return;
+        }
         setUser(user);
     };
     checkUser();
-  }, []);
+  }, [router]);
 
-  const handleSignOut = async () => {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.push("/");
+  // --- 2. CREATE Project (Only if no ID in URL) ---
+  useEffect(() => {
+    if (!user || projectIdParam || isCreating) return;
+
+    const createProject = async () => {
+      setIsCreating(true);
+      console.log("⚡ [Frontend] No ID found. Creating new project...");
+      setStatusMessage("Provisioning new cloud container...");
+
+      try {
+        const { data: { session } } = await createClient().auth.getSession();
+        if (!session) return;
+
+        const res = await fetch(`${BACKEND_URL}${API_PREFIX}/projects/create`, { 
+            method: "POST", 
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session.access_token}`,
+                'ngrok-skip-browser-warning': 'true' // VITAL FOR NGROK
+            } 
+        });
+
+        if (!res.ok) throw new Error(await res.text());
+
+        const data: ProjectCreateResponse = await res.json();
+        console.log("✅ [Frontend] Project Created with ID:", data.project_id);
+
+        // Update URL - This will trigger Effect #3
+        const newParams = new URLSearchParams(searchParams.toString());
+        newParams.set("projectId", data.project_id);
+        router.replace(`?${newParams.toString()}`);
+      } catch (e) {
+        console.error("❌ [Frontend] Creation Failed:", e);
+        setProjectStatus("error");
+        setStatusMessage("Failed to create project.");
+      }
+    };
+
+    createProject();
+  }, [user, projectIdParam, isCreating, searchParams, router]);
+
+  // --- 3. POLL Status (Runs when ID exists in URL) ---
+  useEffect(() => {
+    // Requirements to start polling:
+    // 1. User is logged in
+    // 2. We have a Project ID
+    // 3. We are not already connected
+    // 4. We aren't currently polling (interval ref check)
+    if (!user || !projectIdParam || connection || pollingIntervalRef.current) return;
+
+    console.log(`⏳ [Frontend] ID found (${projectIdParam}). Initializing Polling...`);
+    setProjectStatus("polling");
+    setStatusMessage("Waiting for server to be ready...");
+
+    const startPolling = async () => {
+      const { data: { session } } = await createClient().auth.getSession();
+      if (!session) return;
+      const token = session.access_token;
+
+      // Clear any existing interval just in case
+      if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+
+      pollingIntervalRef.current = setInterval(async () => {
+        try {
+          console.log(`📡 [Frontend] Polling status...`);
+          
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+          const res = await fetch(`${BACKEND_URL}${API_PREFIX}/projects/status/${projectIdParam}`, {
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+                'ngrok-skip-browser-warning': 'true' 
+            },
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+
+          if (!res.ok) {
+             console.warn(`⚠️ [Frontend] Polling 4xx/5xx: ${res.status}`);
+             return;
+          }
+
+          const data: ProjectStatusResponse = await res.json();
+          console.log(`📥 [Frontend] Status: ${data.status}`);
+
+          if (data.status === "ready") {
+             console.log("🎉 [Frontend] Ready! Stopping poll.");
+             if (pollingIntervalRef.current) {
+                clearInterval(pollingIntervalRef.current);
+                pollingIntervalRef.current = null;
+             }
+             fetchConnectionDetails(projectIdParam, token);
+          } else if (data.status === "failed") {
+             if (pollingIntervalRef.current) {
+                clearInterval(pollingIntervalRef.current);
+                pollingIntervalRef.current = null;
+             }
+             setProjectStatus("error");
+             setStatusMessage("Server provisioning failed.");
+          } else {
+             // Still provisioning
+             setStatusMessage(`Status: ${data.status}...`);
+          }
+        } catch (e) {
+          console.error("⚠️ [Frontend] Polling Error:", e);
+        }
+      }, 5000);
+    };
+
+    startPolling();
+
+    // Cleanup on unmount
+    return () => {
+      if (pollingIntervalRef.current) {
+        console.log("🛑 [Frontend] Cleaning up polling interval.");
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+    };
+  }, [user, projectIdParam, connection]); // Reruns if ID changes
+
+  const fetchConnectionDetails = async (projectId: string, token: string) => {
+    try {
+      console.log("🔗 [Frontend] Fetching connection details...");
+      setStatusMessage("Establishing secure bridge...");
+      
+      const res = await fetch(`${BACKEND_URL}${API_PREFIX}/projects/details/${projectId}`, { 
+          headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+              'ngrok-skip-browser-warning': 'true'
+          }
+      });
+      
+      if (!res.ok) throw new Error("Failed to get details");
+      
+      const data: ProjectDetailsResponse = await res.json();
+      console.log("✅ [Frontend] Connected:", data);
+
+      setConnection({
+        ip: data.ip,
+        bridgePort: data.bridge_port,
+        previewPort: data.preview_port,
+        token: data.bridge_token
+      });
+      
+      setProjectStatus("ready");
+    } catch (error) {
+      console.error(error);
+      setProjectStatus("error");
+      setStatusMessage("Failed to retrieve connection details.");
+    }
   };
 
-  // Sync ref with state for event listeners
-  useEffect(() => {
-    sidebarWidthRef.current = sidebarWidth;
-  }, [sidebarWidth]);
+  // --- Layout Resizing Logic ---
+  const sidebarWidthRef = useRef(sidebarWidth);
+  useEffect(() => { sidebarWidthRef.current = sidebarWidth; }, [sidebarWidth]);
 
   useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768);
-    };
-    
-    // Check initially
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
     checkMobile();
-    
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
@@ -126,20 +278,39 @@ export default function DashboardLayout() {
     };
   }, [isDragging, resize, stopResizing]);
 
+  // --- Render ---
+
+  if (projectStatus === "error") {
+      return (
+        <div className="h-screen w-full bg-[#0a0a0a] flex flex-col items-center justify-center text-white gap-4">
+            <p className="text-red-400">{statusMessage}</p>
+            <button onClick={() => window.location.reload()} className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded">Retry</button>
+        </div>
+      );
+  }
+
+  if (projectStatus !== "ready" || !connection) {
+      return (
+        <div className="h-screen w-full bg-[#0a0a0a] relative">
+             <Loader />
+             <div className="absolute bottom-10 w-full text-center text-white/50 text-sm font-mono animate-pulse">
+                {statusMessage}
+             </div>
+        </div>
+      );
+  }
+
   return (
     <div className={clsx("flex h-screen w-full bg-[#0a0a0a] overflow-hidden text-white", isMobile ? "flex-col" : "flex-row")}>
-      {/* Sidebar / Chat */}
       <div className={clsx(isMobile ? (mobileView === 'chat' ? "flex-1 w-full overflow-hidden" : "hidden") : "h-full shrink-0")}>
         <ChatPanel 
-          initialPrompt={prompt || ""} 
+          initialPrompt={initialPrompt || ""} 
           width={isMobile ? "100%" : sidebarWidth} 
           isResizing={isDragging}
-          isLoading={isLoading}
-          onLoadingChange={setIsLoading}
+          connection={connection}
         />
       </div>
 
-      {/* Resize Handle - Desktop Only */}
       {!isMobile && (
         <div
           className={`w-1 cursor-col-resize hover:bg-blue-500 hover:opacity-100 active:bg-blue-500 transition-colors duration-200 bg-white/5 hover:bg-white/20 z-50 flex-shrink-0 ${isDragging ? 'bg-blue-500 opacity-100' : 'opacity-0 hover:opacity-100'}`}
@@ -147,18 +318,13 @@ export default function DashboardLayout() {
         />
       )}
 
-      {/* Main Workspace */}
       <div className={clsx(isMobile ? (mobileView === 'workspace' ? "flex-1 w-full overflow-hidden" : "hidden") : "flex-1 h-full min-w-0")}>
         <WorkspacePanel 
-          code={code} 
-          previewCode={debouncedCode}
-          onCodeChange={(val) => setCode(val || "")} 
+          connection={connection}
           isDragging={isDragging} 
-          isLoading={isLoading}
         />
       </div>
 
-      {/* Mobile Navigation */}
       {isMobile && (
         <div className="h-16 border-t border-white/10 bg-[#0a0a0a] flex items-center justify-around px-4 shrink-0 z-50 pb-safe">
           <button
