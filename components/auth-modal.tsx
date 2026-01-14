@@ -187,7 +187,7 @@ export default function AuthModal({ isOpen, onClose, defaultView = "login" }: Au
           </div>
 
           <p className="mt-8 text-center text-xs text-white/30 leading-relaxed">
-            By signing up or signing in, you agree to our <a href="#" className="underline hover:text-white/50">Terms</a> and <a href="#" className="underline hover:text-white/50">Privacy Policy</a>.
+            By signing up or signing in, you agree to our  <a href="#" className="underline hover:text-white/50">Terms</a> and <a href="#" className="underline hover:text-white/50">Privacy Policy</a>.
           </p>
         </div>
       </div>
