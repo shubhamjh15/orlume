@@ -120,7 +120,7 @@ export default function ProjectGrid() {
 
         const data = await res.json();
         
-        // ProjectListResponse structure: { items: [], total: int, page: int, size: int }
+        
         const projectList = data.items || [];
 
         const mappedProjects: Project[] = projectList.map((p: any) => ({
