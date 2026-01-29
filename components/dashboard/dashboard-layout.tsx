@@ -324,7 +324,6 @@ export default function DashboardLayout() {
           isDragging={isDragging} 
         />
       </div>
-
       {isMobile && (
         <div className="h-16 border-t border-white/10 bg-[#0a0a0a] flex items-center justify-around px-4 shrink-0 z-50 pb-safe">
           <button
@@ -334,6 +333,7 @@ export default function DashboardLayout() {
               mobileView === 'chat' ? "text-white bg-white/10" : "text-white/40 hover:text-white"
             )}
           >
+            
             <MessageSquare size={20} />
             <span className="text-[10px] font-medium">Chat</span>
           </button>
@@ -344,6 +344,9 @@ export default function DashboardLayout() {
               mobileView === 'workspace' ? "text-white bg-white/10" : "text-white/40 hover:text-white"
             )}
           >
+  
+
+
             <LayoutTemplate size={20} />
             <span className="text-[10px] font-medium">Workspace</span>
           </button>

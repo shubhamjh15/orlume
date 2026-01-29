@@ -146,7 +146,7 @@ export default function ProjectGrid() {
           setLoading(false);
       }
     };
-
+ 
     fetchProjects();
   }, [activeTab]);
 
