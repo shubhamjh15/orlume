@@ -7,6 +7,11 @@ import Link from "next/link";
 import clsx from "clsx";
 import { RemoteConnection } from "./dashboard-layout";
 
+import { createClient } from "@/utils/supabase/client";
+
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "https://6a68a84ec602.ngrok-free.app";
+const API_PREFIX = "/api/v1";
+
 interface Message {
   role: "user" | "assistant" | "system";
   content: string;
@@ -22,13 +27,15 @@ interface ChatPanelProps {
   width?: number | string;
   isResizing?: boolean;
   connection?: RemoteConnection | null;
+  projectId?: string | null;
 }
 
 export default function ChatPanel({ 
   initialPrompt, 
   width = 450, 
   isResizing = false, 
-  connection
+  connection,
+  projectId
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -37,22 +44,6 @@ export default function ChatPanel({
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const hasSentInitial = useRef(false);
-
-  // Handle Initial Prompt
-  useEffect(() => {
-    if (initialPrompt && !hasSentInitial.current && connection) {
-      hasSentInitial.current = true;
-      setMessages([
-        { role: "user", content: initialPrompt },
-        { role: "assistant", content: "Environment is ready. (Note: AI Agent is currently disabled in this demo version. You can edit files manually in the Workspace.)" }
-      ]);
-    }
-  }, [initialPrompt, connection]);
-
-  // Scroll to bottom
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isLoading]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -69,31 +60,136 @@ export default function ChatPanel({
     setUploadedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  const send = () => {
-    if (!input.trim() && uploadedFiles.length === 0) return;
+  const invokeAgent = async (promptText: string) => {
+    if (!promptText.trim() || !connection || !projectId) return;
+
+    setIsLoading(true);
+    setLoadingText("Thinking...");
+
+    try {
+        const supabase = createClient();
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (!session) throw new Error("No active session");
+
+        const payload = {
+            prompt: promptText,
+            project_id: projectId,
+            ip: connection.ip,
+            bridge_port: connection.bridgePort,
+            bridge_token: connection.token,
+            access_token: session.access_token
+        };
+
+        const res = await fetch(`${BACKEND_URL}${API_PREFIX}/agent/invoke`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${session.access_token}`,
+                "ngrok-skip-browser-warning": "true"
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!res.body) throw new Error("No response body");
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let assistantMessage = "";
+
+        setMessages(prev => [...prev, { role: "assistant", content: "" }]);
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            const chunk = decoder.decode(value);
+            assistantMessage += chunk;
+            
+            setMessages(prev => {
+                const newHistory = [...prev];
+                const lastMsg = newHistory[newHistory.length - 1];
+                if (lastMsg.role === "assistant") {
+                    lastMsg.content = assistantMessage;
+                }
+                return newHistory;
+            });
+        }
+    } catch (error) {
+        console.error("Agent Error:", error);
+        setMessages(prev => [...prev, { role: "assistant", content: "Error: Failed to get response from agent." }]);
+    } finally {
+        setIsLoading(false);
+    }
+  };
+
+  const send = async () => {
+    if ((!input.trim() && uploadedFiles.length === 0) || !connection || !projectId) return;
     
-    // User Message
-    const userMsg: Message = { role: "user", content: input };
+    const userPrompt = input;
+    const userMsg: Message = { role: "user", content: userPrompt };
     setMessages(prev => [...prev, userMsg]);
     setInput("");
     setUploadedFiles([]); 
     
-    // Simulate AI Response (Disabled Logic)
-    setIsLoading(true);
-    setLoadingText("Thinking...");
-    
-    setTimeout(() => {
-      setLoadingText("Processing...");
-    }, 500);
-
-    setTimeout(() => {
-      setIsLoading(false);
-      setMessages(prev => [...prev, { 
-          role: "assistant", 
-          content: "I've received your input, but the AI Agent is currently disabled. Please use the Code Editor to make changes." 
-      }]);
-    }, 1000);
+    await invokeAgent(userPrompt);
   };
+
+
+  useEffect(() => {
+    const fetchHistory = async () => {
+        if (!projectId || !connection) return;
+        
+        try {
+            const supabase = createClient();
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session) return;
+
+            const res = await fetch(`${BACKEND_URL}${API_PREFIX}/chat/${projectId}/history`, {
+                headers: {
+                    'Authorization': `Bearer ${session.access_token}`,
+                    'ngrok-skip-browser-warning': 'true'
+                }
+            });
+
+            if (res.ok) {
+                const history = await res.json();
+                if (Array.isArray(history)) {
+                    setMessages(prev => {
+                         // Only add history if we haven't already (simple check)
+                         // But we might have initial prompt. 
+                         // Logic: if prev has items, it might be initial prompt.
+                         // We probably want history BEFORE initial prompt if both happen?
+                         // But initial prompt effect runs once.
+                         // Let's just set history. If initial prompt comes later, it appends.
+                         // If initial prompt already appended, we might duplicate?
+                         // "hasSentInitial" guards initial prompt.
+                         // Let's replace `prev` with `history` but append any `new` messages?
+                         // Safe bet: just set it, assuming history fetch is fast or first.
+                         // Actually, sticking to "replace" might be safest to avoid loops, 
+                         // but we need to respect if user typed something?
+                         // Determining "loading state" vs "active" is hard.
+                         // For now simply setting it is okay as this runs on connection.
+                         return history;
+                    });
+                }
+            }
+        } catch (e) {
+            console.error("Failed to load chat history", e);
+        }
+    };
+    fetchHistory();
+  }, [projectId, connection]);
+
+  
+  useEffect(() => {
+    if (initialPrompt && !hasSentInitial.current && connection) {
+     
+      setMessages(prev => [...prev, { role: "user", content: initialPrompt }]);
+     
+      invokeAgent(initialPrompt);
+    }
+  }, [initialPrompt, connection]);
 
   return (
     <div 

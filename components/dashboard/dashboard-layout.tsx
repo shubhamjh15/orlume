@@ -88,7 +88,7 @@ export default function DashboardLayout() {
         const { data: { session } } = await createClient().auth.getSession();
         if (!session) return;
 
-        const res = await fetch(`${BACKEND_URL}${API_PREFIX}/projects/create`, { 
+        const res = await fetch(`${BACKEND_URL}${API_PREFIX}/orchestrator/create`, { 
             method: "POST", 
             headers: { 
                 'Content-Type': 'application/json',
@@ -144,7 +144,7 @@ export default function DashboardLayout() {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-          const res = await fetch(`${BACKEND_URL}${API_PREFIX}/projects/status/${projectIdParam}`, {
+          const res = await fetch(`${BACKEND_URL}${API_PREFIX}/orchestrator/${projectIdParam}/status`, {
             headers: { 
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`,
@@ -203,7 +203,7 @@ export default function DashboardLayout() {
       console.log("🔗 [Frontend] Fetching connection details...");
       setStatusMessage("Establishing secure bridge...");
       
-      const res = await fetch(`${BACKEND_URL}${API_PREFIX}/projects/details/${projectId}`, { 
+      const res = await fetch(`${BACKEND_URL}${API_PREFIX}/orchestrator/${projectId}/details`, { 
           headers: { 
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${token}`,
@@ -289,17 +289,7 @@ export default function DashboardLayout() {
       );
   }
 
-  if (projectStatus !== "ready" || !connection) {
-      return (
-        <div className="h-screen w-full bg-[#0a0a0a] relative">
-             <Loader />
-             <div className="absolute bottom-10 w-full text-center text-white/50 text-sm font-mono animate-pulse">
-                {statusMessage}
-             </div>
-        </div>
-      );
-  }
-
+  // --- Render ---
   return (
     <div className={clsx("flex h-screen w-full bg-[#0a0a0a] overflow-hidden text-white", isMobile ? "flex-col" : "flex-row")}>
       <div className={clsx(isMobile ? (mobileView === 'chat' ? "flex-1 w-full overflow-hidden" : "hidden") : "h-full shrink-0")}>
@@ -308,6 +298,7 @@ export default function DashboardLayout() {
           width={isMobile ? "100%" : sidebarWidth} 
           isResizing={isDragging}
           connection={connection}
+          projectId={projectIdParam}
         />
       </div>
 
@@ -322,6 +313,8 @@ export default function DashboardLayout() {
         <WorkspacePanel 
           connection={connection}
           isDragging={isDragging} 
+          isLoading={projectStatus !== "ready"}
+          statusMessage={statusMessage}
         />
       </div>
       {isMobile && (

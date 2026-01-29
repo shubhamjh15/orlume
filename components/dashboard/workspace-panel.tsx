@@ -9,9 +9,13 @@ import clsx from "clsx";
 import { io, Socket } from "socket.io-client";
 import { RemoteConnection } from "./dashboard-layout";
 
+import Loader from "./loader";
+
 interface WorkspacePanelProps {
-  connection: RemoteConnection;
+  connection: RemoteConnection | null;
   isDragging?: boolean;
+  isLoading?: boolean;
+  statusMessage?: string;
 }
 
 export type LogEntry = {
@@ -21,7 +25,7 @@ export type LogEntry = {
     message: string;
 };
 
-export default function WorkspacePanel({ connection, isDragging = false }: WorkspacePanelProps) {
+export default function WorkspacePanel({ connection, isDragging = false, isLoading = false, statusMessage = "" }: WorkspacePanelProps) {
   const [activeTab, setActiveTab] = useState<"preview" | "code" | "integration">("preview");
   const [device, setDevice] = useState<"desktop" | "tablet" | "mobile">("desktop");
   const [reloadKey, setReloadKey] = useState(0);
@@ -80,7 +84,7 @@ export default function WorkspacePanel({ connection, isDragging = false }: Works
             });
         }
     });
-
+     
     socket.on("terminal:data", (data: string) => {
         // Simple heuristic to determine log type
         let type: LogEntry['type'] = 'info';
@@ -116,7 +120,7 @@ export default function WorkspacePanel({ connection, isDragging = false }: Works
 
   // --- File Saving Logic ---
   const handleCodeChange = (newCode: string | undefined) => {
-      if (!newCode) return;
+      if (!newCode || !connection) return;
 
       // Optimistic update
       setFilesContent(prev => ({ ...prev, [activeFile]: newCode }));
@@ -218,6 +222,13 @@ export default function WorkspacePanel({ connection, isDragging = false }: Works
       {/* Main Content Area */}
       <div className={clsx("flex-1 overflow-hidden relative flex flex-col", isDragging && "pointer-events-none select-none")}>
         <div className="flex-1 relative overflow-hidden">
+            {isLoading && (
+                 <div className="absolute inset-0 z-50 bg-[#0a0a0a] flex flex-col items-center justify-center">
+                    <Loader />
+                    <p className="mt-4 text-white/50 text-sm animate-pulse">{statusMessage}</p>
+                 </div>
+            )}
+            
             <div className={clsx("absolute inset-0 w-full h-full bg-[#111]", activeTab === "preview" ? "z-10" : "z-0 opacity-0 pointer-events-none")}>
                <PreviewFrame 
                   url={previewUrl} 
