@@ -21,7 +21,7 @@ const cormorantGaramond = localFont({
   ],
   variable: "--font-cormorant",
 });
-
+     
 export const metadata: Metadata = {
   title: "Orlume | The AI Website Builder",
   description: "Create stunning, production-ready websites in seconds with Orlume AI. From concept to code, let artificial intelligence build your interface.",
