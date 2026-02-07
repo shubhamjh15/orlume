@@ -167,6 +167,9 @@ export default function Home() {
            </p>
         </div>
 
+        {/* Hidden H2 for Semantic Hierarchy */}
+        <h2 className="sr-only">AI Website Generation</h2>
+
         {/* AI Input Box */}
         <div className="w-full max-w-3xl relative group">
            <div className="absolute -inset-1 bg-gradient-to-r from-pink-500/10 to-purple-500/10 rounded-2xl blur opacity-0 group-hover:opacity-100 transition duration-500"></div>
