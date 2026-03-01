@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
-import { MoreHorizontal, Trash2, FolderPlus } from "lucide-react";
+import { MoreHorizontal, Trash2, FolderPlus, Loader2 } from "lucide-react";
 import clsx from "clsx";
+import { useRouter } from "next/navigation";
 
 import { createClient } from "@/utils/supabase/client";
 
@@ -75,7 +76,9 @@ export default function ProjectGrid() {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(false);
+  const [connectingId, setConnectingId] = useState<string | null>(null);
   const supabase = createClient();
+  const router = useRouter();
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -161,6 +164,48 @@ export default function ProjectGrid() {
     }
   };
 
+  const handleConnect = async (id: string, type: 'project' | 'template') => {
+    if (type !== 'project') {
+      // Templates are not handled yet in this instruction
+      console.log('Clicked template:', id);
+      return;
+    }
+
+    try {
+      setConnectingId(id);
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        setConnectingId(null);
+        return;
+      }
+
+      const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "https://6a68a84ec602.ngrok-free.app";
+      const API_PREFIX = "/api/v1";
+
+      const res = await fetch(`${BACKEND_URL}${API_PREFIX}/orchestrator/${id}/connect`, {
+         method: "POST",
+         headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'ngrok-skip-browser-warning': 'true'
+         }
+      });
+
+      if (!res.ok) {
+         console.error("Failed to connect project:", await res.text());
+         setConnectingId(null);
+         return;
+      }
+      
+      // Successfully called connect
+      router.push(`/dashboard?projectId=${id}`);
+
+    } catch (err) {
+        console.error("Error connecting to project:", err);
+        setConnectingId(null);
+    }
+  };
+
   const filteredItems = items.filter((item) => {
     if (activeTab === "projects") return item.type === "project";
     if (activeTab === "templates") return item.type === "template";
@@ -209,7 +254,14 @@ export default function ProjectGrid() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {filteredItems.map((project) => (
-              <div key={project.id} className="group relative flex flex-col gap-3">
+              <div 
+                key={project.id} 
+                className={clsx(
+                  "group relative flex flex-col gap-3",
+                  connectingId === project.id ? "opacity-50 pointer-events-none" : "cursor-pointer"
+                )}
+                onClick={() => handleConnect(project.id, project.type)}
+              >
                 {/* Thumbnail Card */}
                 <div className="relative aspect-video w-full rounded-xl overflow-hidden bg-[#1a1a1a] border border-white/5 group-hover:border-white/20 transition-all shadow-lg group-hover:shadow-2xl group-hover:translate-y-[-2px]">
                   <Image
@@ -219,6 +271,13 @@ export default function ProjectGrid() {
                     className="object-cover opacity-80 group-hover:opacity-100 transition-opacity grayscale group-hover:grayscale-0"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                  
+                  {connectingId === project.id && (
+                    <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center gap-2 text-white pb-safe z-10 transition-opacity">
+                       <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+                       <span className="text-sm font-medium">Connecting...</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Info */}

@@ -109,9 +109,16 @@ export default function ChatPanel({
             setMessages(prev => {
                 const newHistory = [...prev];
                 const lastMsg = newHistory[newHistory.length - 1];
-                if (lastMsg.role === "assistant") {
+                
+                // Check if lastMsg exists and is from the assistant
+                if (lastMsg && lastMsg.role === "assistant") {
+                    // Update existing assistant message
                     lastMsg.content = assistantMessage;
+                } else {
+                    // If it doesn't exist, safely append a new assistant message
+                    newHistory.push({ role: "assistant", content: assistantMessage });
                 }
+                
                 return newHistory;
             });
         }
