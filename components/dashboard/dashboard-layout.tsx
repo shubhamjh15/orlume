@@ -74,7 +74,7 @@ export default function DashboardLayout() {
     };
     checkUser();
   }, [router]);
-
+ 
   // --- 2. CREATE Project (Only if no ID in URL) ---
   useEffect(() => {
     if (!user || projectIdParam || isCreating) return;
